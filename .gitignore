@@ -1,0 +1,8 @@
+*.o
+*.out
+*.so
+*.a
+*.json
+*.ninja
+*.elf
+*.bin

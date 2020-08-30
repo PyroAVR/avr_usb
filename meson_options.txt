@@ -1,0 +1,14 @@
+option(
+    'cpu_freq',
+    type: 'integer',
+    min: 0,
+    value: 16000000,
+    description: 'Clock speed of target. This is only a definition for macros.'
+)
+
+option(
+    'programmer',
+    type: 'array',
+    value: ['usbtiny'], #['arduino', '-P', '/dev/ttyACM0'],
+    description: 'AVR Programmer to flash the MCU with.'
+)

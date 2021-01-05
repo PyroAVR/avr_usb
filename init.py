@@ -12,7 +12,7 @@ import shlex
 
 def find_toolchain(what):
     """
-    Find an appropriate install of arm-none-eabi-gcc
+    Find an appropriate install of avr-gcc
     """
     arm_gcc = subprocess.check_output(['which', shlex.quote(what)]).decode('utf-8')
     return arm_gcc[:arm_gcc.rfind('/')]
@@ -28,8 +28,8 @@ def find_root():
 
 
 pyinit_replacements = {
-    "PYINIT_CONFIG_TOOLCHAIN_BASE": find_toolchain('arm-none-eabi-gcc'),
-    "PYINIT_CONFIG_PROJECT_ROOT": find_root() + '/k64_files'
+    "PYINIT_CONFIG_TOOLCHAIN_BASE": find_toolchain('avr-gcc'),
+    "PYINIT_CONFIG_PROJECT_ROOT": find_root() + '/avr_files'
 }
 
 # FIXME change this to a tree walk of template_files

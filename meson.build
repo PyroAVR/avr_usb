@@ -1,7 +1,10 @@
 project('avr_project_template', 'c')
 
+proj_queue = subproject('base_queue')
+dep_queue = proj_queue.get_variable('dep_queue')
+
 # dependencies
-dependencies = []
+dependencies = [dep_queue]
 
 # Project include path.
 local_headers = ['include']
@@ -9,6 +12,9 @@ local_headers = ['include']
 # Do not remove the core files if you are not certain of what you are doing.
 # List of C sources to compile. Relative to project root.
 c_sources = [
+    'src/main.c',
+    'src/uart.c',
+    'src/usb_descriptors.c',
 ]
 
 # List of ASM sources to compile.  Relative to project root.

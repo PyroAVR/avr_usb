@@ -2,7 +2,7 @@
 
 #include <stdint.h>
 
-typedef struct usb_device_desc_t {
+typedef struct {
     uint8_t   bLength;
     uint8_t   bDescriptorType;
     uint16_t  bcdUSB;
@@ -19,7 +19,7 @@ typedef struct usb_device_desc_t {
     uint8_t   bNumConfigurations;
 } usb_device_desc_t;
 
-typedef struct usb_config_desc_t {
+typedef struct {
     uint8_t   bLength;
     uint8_t   bDescriptorType;
     uint16_t  wTotalLength;
@@ -30,13 +30,13 @@ typedef struct usb_config_desc_t {
     uint8_t   bMaxPower;
 } usb_config_desc_t;
 
-typedef struct usb_string_desc_t {
+typedef struct {
     uint8_t bLength;
     uint8_t bDescriptorType;
-    uint8_t* bString;
+    uint8_t bString[];
 } usb_string_desc_t;
 
-typedef struct usb_if_desc_t {
+typedef struct {
     uint8_t   bLength;
     uint8_t   bDescriptorType;
     uint8_t   bInterfaceNumber;
@@ -48,7 +48,7 @@ typedef struct usb_if_desc_t {
     uint8_t   iInterface;
 } usb_interface_desc_t;
 
-typedef struct usb_ep_desc_t {
+typedef struct {
     uint8_t   bLength;
     uint8_t   bDescriptorType;
     uint8_t   bEndpointAddress;
@@ -58,51 +58,15 @@ typedef struct usb_ep_desc_t {
 } usb_endpoint_desc_t;
 
 typedef struct {
-    uint8_t   bmRequestType;
-    uint8_t   bRequest;
-} usb_req_hdr_t;
-
-typedef struct {
-    uint8_t   bmRequestType;
-    uint8_t   bRequest;
-    uint16_t  wValue;
-    uint16_t  wIndex;
-    uint16_t  wLength;
-} usb_req_std_t;
-
-typedef struct {
-    uint8_t   bmRequestType;
-    uint8_t   bRequest;
-    uint8_t   wValueLSB;
-    uint8_t   wValueMSB;
-    uint8_t   wIndexLSB;
-    uint8_t   wIndexMSB;
-    uint8_t   wLengthLSB;
-    uint8_t   wLengthMSB;
-} usb_req_val_t;
-
-typedef struct {
-    uint8_t   bmRequestType;
-    uint8_t   bRequest;
-    uint8_t   index;
-    uint8_t   type;
-    uint16_t  language_id;
-    uint16_t  length;
-} usb_req_get_desc_t;
-
-typedef enum {
-    USB_REQ_GET_STATUS = 0,
-    USB_REQ_CLEAR_FEATURE = 1,
-    USB_REQ_SET_FEATURE = 3,
-    USB_REQ_SET_ADDRESS = 5,
-    USB_REQ_GET_DESCRIPTOR = 6,
-    USB_REQ_SET_DESCRIPTOR = 7,
-    USB_REQ_GET_CONFIGURATION = 8,
-    USB_REQ_SET_CONFIGURATION = 9,
-    USB_REQ_GET_INTERFACE = 10,
-    USB_REQ_SET_INTERFACE = 11,
-    USB_REQ_SYNCH_FRAME = 12,
-} usb_b_req_t;
+    uint8_t bLength;
+    uint8_t bDescriptortype;
+    uint8_t bFirstInterface;
+    uint8_t bInterfaceCount;
+    uint8_t bFunctionClass;
+    uint8_t bFunctionSubClass;
+    uint8_t bFunctionProtocol;
+    uint8_t iFunction;
+} usb_assoc_desc_t;
 
 typedef enum {
     USB_DESC_DEVICE = 1,
@@ -113,4 +77,30 @@ typedef enum {
     USB_DESC_DEVICE_QUAL = 6,
     USB_DESC_OTHER_SPEED_CONF = 7,
     USB_DESC_INTERFACE_POWER = 8,
-} usb_desc_req_type_t;
+    USB_DESC_OTG = 9,
+    USB_DESC_DEBUG = 10,
+    USB_DESC_INTERFACE_ASSOC = 11,
+} usb_desc_type_t;
+
+// Table 9-13 in USB2.0
+typedef enum {
+    USB_EP_ATTRS_CTRL = 0,
+    USB_EP_ATTRS_ISO = 1,
+    USB_EP_ATTRS_BULK = 2,
+    USB_EP_ATTRS_INT = 3,
+
+    USB_EP_ATTRS_NO_SYNC = 0,
+    USB_EP_ATTRS_ASYNC = (1 << 2),
+    USB_EP_ATTRS_ADAPTIVE = (2 << 2),
+    USB_EP_ATTRS_SYNC = (3 << 2),
+
+    USB_EP_ATTRS_DATA = 0,
+    USB_EP_ATTRS_FEEDBACK = (1 << 4),
+    USB_EP_ATTRS_IMPL_FEEDBACK = (2 << 4),
+    USB_EP_ATTRS_RESERVED = (3 << 4),
+} usb_ep_attrs_t;
+
+typedef enum {
+    USB_EP_DIR_OUT = 0,
+    USB_EP_DIR_IN = (1 << 7)
+} usb_ep_dir_t;

@@ -2,7 +2,9 @@
 #include <avr/interrupt.h>
 #include <util/delay.h>
 #include <stdint.h>
-#include <usb_enumerate.h>
+#include "usb_base_descriptors.h"
+#include "usb_requests.h"
+
 #include "usb_descriptors.h"
 
 #include <drivers/uart.h>
@@ -12,6 +14,7 @@
 #define min(x, y) (((x) > (y)) ? (y):(x))
 
 char uart_bufs[2][64] = {0};
+__attribute__((aligned(4)))
 char ep_buf[64] = {0};
 
 typedef enum {
@@ -101,8 +104,14 @@ void handle_setup(int epnum) {
                         have_sent_config_hdr = true;
                     }
                     else {
+                        // FIXME we need chain transfers here for larger descriptors, ep will get full
                         write_usb_ep(0, ((char*)&self_config_desc), 0x12);
                     }
+                    UEINTX = ~_BV(TXINI);
+                break;
+
+                case USB_DESC_STRING:
+                    write_usb_ep(0, (char*)str_desc_tab[req->get_desc.index], str_desc_tab[req->get_desc.index]->bLength);
                     UEINTX = ~_BV(TXINI);
                 break;
 

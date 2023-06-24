@@ -50,12 +50,17 @@ void uart_puts(char *data, int len) {
 
 int uart_puts_noblock(char *data, int len) {
     int i = 0;
-    while(uart_tx.op_ok && i < len) {
+    /*cli();*/
+    while(i < len) {
         queue_push(&uart_tx, data[i]);
+        if(!uart_tx.op_ok) {
+            break;
+        }
         i++;
     }
     uart_tx.op_ok = true;
     uart_en_tx();
+    /*sei();*/
     return i;
 }
 
@@ -88,6 +93,7 @@ ISR(USART1_RX_vect) {
  * ready-to-send byte interrupt
  */
 ISR(USART1_UDRE_vect) {
+    /*cli();*/
     char c = queue_pop(&uart_tx);
     if(!uart_tx.op_ok) {
         UCSR1B &= ~(1 << UDRIE1); // disable txi
@@ -96,4 +102,5 @@ ISR(USART1_UDRE_vect) {
     else {
         UDR1 = c;
     }
+    /*sei();*/
 }

@@ -15,6 +15,8 @@ c_sources = [
     'src/main.c',
     'src/uart.c',
     'src/usb_descriptors.c',
+    'src/monoqueue.c',
+    'src/32u4_usb.c',
 ]
 
 # List of ASM sources to compile.  Relative to project root.
@@ -37,6 +39,7 @@ avrdude = find_program('avrdude', required: false, disabler: true)
 
 add_project_arguments(['-mmcu=' + host_machine.cpu()], language: 'c')
 add_project_link_arguments(['-mmcu=' + host_machine.cpu()], language: 'c')
+add_project_link_arguments(['-Wl,-Map=' + 'main.map'], language: 'c')
 
 add_project_arguments(['-DF_CPU=' + get_option('cpu_freq').to_string()], language: 'c')
 add_project_link_arguments(['-DF_CPU=' + get_option('cpu_freq').to_string()], language: 'c')

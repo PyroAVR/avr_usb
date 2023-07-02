@@ -102,25 +102,33 @@ bool atmega_xu4_ep_flush(int epnum) {
  * Write from the software queue to DPRAM, writing at most
  * min(UECFG1X[EPSIZE], q->size) bytes.
  */
-static void flush_queue(char epnum) {
+static void flush_queue(char epnum, char flag) {
     queue_t *q = usb_ep_handlers[epnum]->data;
     UENUM = epnum;
+    // TODO need a lookup here for actual count of bytes
     size_t epsize = (UECFG1X & (0x7 << EPSIZE0)) >> EPSIZE0;
     //   not control ep           r/w allowed
-    if((UECFG0X & (3 << 6)) && !(UEINTX & _BV(RWAL))) {
-        return;
-    }
+    /*
+     *if((UECFG0X & (3 << 6)) && !(UEINTX & _BV(RWAL))) {
+     *    return;
+     *}
+     */
     uart_puts("wr ok\r\n", 7);
     while(!QUEUE_EMPTY(q)) {
-        if(UEBCX < epsize) {
+        // FIXME hack for endpoint size
+        if(UEBCX < EP0_LEN) {
+            uart_puts("wr 1\r\n", 6);
             UEDATX = queue_pop(q);
         }
         //      > 0 non-full banks
         else if(UESTA0X & 0x3) {
-            // clear fifocon to switch banks
-            UEINTX &= ~_BV(FIFOCON);
+            uart_puts("fifo\r\n", 6);
+            // clear FIFOCON to switch banks (IN) or TXINI to start ACKing
+            // IN packets (SETUP)
+            UEINTX &= ~flag;
         }
         else {
+            uart_puts("break\r\n", 7);
             // yield until next IN or bank ready
             break;
         }
@@ -145,6 +153,10 @@ static void flush_queue(char epnum) {
         }
 #endif
     }
+    // FIXME hack to get it to transmit when queue is empty
+    UEINTX &= ~_BV(TXINI);
+    // disable IN interrupts
+    UEIENX &= ~_BV(TXINE);
     // flush bank (short packet write at end of xfer)
     // TODO we might not want to do this if the entire transfer made by the
     // application does not fit in the queue: could lead to early-aborts on
@@ -182,7 +194,9 @@ static void fill_queue(char epnum, char flag) {
         else if(UESTA0X & 0x3) {
             // DPRAM buffer is empty, clear FIFOCON to swap banks (OUT), or
             // RXSTPI to disable interrupt (SETUP)
-            // TODO might need to clear RXOUTI here on OUT endpoints, 22.13.1
+            // TODO might need to clear RXOUTI here on OUT endpoints, 22.13.1,
+            // because RXOUTI is only cleared once in the interrupt handler,
+            // not at every FIFOCON toggle
             UEINTX &= ~flag;
         }
         else {
@@ -219,17 +233,18 @@ void handle_setup(usb_ep_ctx_t *ctx) {
     } *req;
     req = ep0_buf;
     // XXX: reset queue write ptr so we overwrite data w/o calling pop
-    ep0_queue.wr = 0;
-    ep0_queue.size = 0;
+    QUEUE_RESET(&ep0_queue);
     int addr = 0;
     switch(req->hdr.bRequest) {
         case USB_REQ_GET_DESCRIPTOR:
             switch(req->get_desc.type) {
                 case USB_DESC_DEVICE:
                     uart_puts("device\r\n", 8);
-                    for(int i = 0; i < sizeof(usb_device_desc_t); i++) {
+                    for(size_t i = 0; i < sizeof(usb_device_desc_t); i++) {
                         queue_push(&ep0_queue, ((uint_least8_t *)&self_device_desc)[i]);
                     }
+                    // enable IN interrupts after SETUP
+                    UEIENX |= _BV(TXINE);
                     /*write_usb_ep(0);*/
                     /*
                      *mqueue_init(&ep0_out, (uint_least8_t *)&self_device_desc, sizeof(usb_device_desc_t));
@@ -299,7 +314,7 @@ ISR(USB_GEN_vect) {
         UECONX |= (1 << EPEN);
         UECFG0X = 0; // control type, direction is OUT (rx from our perspective)
         UECFG1X = _BV(EPSIZE0) | _BV(EPSIZE1) | _BV(ALLOC); // 64 byte buffer
-        UEIENX |= _BV(RXSTPE); // enable setup interrupts only
+        UEIENX |= _BV(RXSTPE) | _BV(RXOUTI); // enable useful interrupts only
         if(!(UESTA0X & _BV(CFGOK))) {
             /*uart_puts("failed\n", 7);*/
             return;
@@ -362,17 +377,19 @@ ISR(USB_COM_vect) {
         else if(events & _BV(TXINI)) {
             // IN transfer
             uart_puts("write\r\n", 7);
-            UEINTX &= ~ _BV(TXINI);
-            flush_queue(0);
+            /*UEINTX &= ~ _BV(TXINI);*/
+            // TODO statefully detect if we are doing setup or normal operation,
+            // and change the "flag" argument accordingly.
+            flush_queue(0, _BV(TXINI));
         }
-        else {
+        if(events & _BV(RXOUTI)) {
             // OUT transfer
             uart_puts("read\r\n", 6);
             UEINTX &= ~ _BV(RXOUTI);
             fill_queue(0, _BV(FIFOCON));
         }
         usb_ep_handlers[0]->callback(usb_ep_handlers[0]);
-        UEINTX &= ~events;
+        /*UEINTX &= ~events;*/
     }
 }
 #if 0

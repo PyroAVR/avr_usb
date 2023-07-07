@@ -85,6 +85,7 @@ done:
  */
 
 ISR(USART1_RX_vect) {
+    // TODO this may not actually read UDR1, try using a temporary variable.
     queue_push(&uart_rx, UDR1);
 }
 
@@ -93,7 +94,6 @@ ISR(USART1_RX_vect) {
  * ready-to-send byte interrupt
  */
 ISR(USART1_UDRE_vect) {
-    /*cli();*/
     char c = queue_pop(&uart_tx);
     if(!uart_tx.op_ok) {
         UCSR1B &= ~(1 << UDRIE1); // disable txi
@@ -102,5 +102,4 @@ ISR(USART1_UDRE_vect) {
     else {
         UDR1 = c;
     }
-    /*sei();*/
 }

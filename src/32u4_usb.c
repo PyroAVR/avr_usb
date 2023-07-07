@@ -20,10 +20,10 @@
 #define NUM_EPS 1
 
 #if !defined(ATMEGA_XU4_USB_SW_QUEUE_LEN)
-#define ATMEGA_XU4_USB_SW_QUEUE_LEN 64
+#define ATMEGA_XU4_USB_SW_QUEUE_LEN 128
 #endif
 
-#define EP0_LEN 64
+#define EP0_LEN ATMEGA_XU4_USB_SW_QUEUE_LEN
 
 #define min(x, y) (((x) > (y)) ? (y):(x))
 
@@ -102,6 +102,7 @@ bool atmega_xu4_ep_flush(int epnum) {
  * Write from the software queue to DPRAM, writing at most
  * min(UECFG1X[EPSIZE], q->size) bytes.
  */
+static bool flush_lock = false;
 static void flush_queue(char epnum, char flag) {
     queue_t *q = usb_ep_handlers[epnum]->data;
     UENUM = epnum;
@@ -113,11 +114,12 @@ static void flush_queue(char epnum, char flag) {
      *    return;
      *}
      */
-    uart_puts("wr ok\r\n", 7);
+    uart_puts((char*)&q->size, 2);
     while(!QUEUE_EMPTY(q)) {
         // FIXME hack for endpoint size
-        if(UEBCX < EP0_LEN) {
-            uart_puts("wr 1\r\n", 6);
+        size_t hw_size = UEBCX;
+        if(hw_size < 64) {
+            uart_puts("1", 1);
             UEDATX = queue_pop(q);
         }
         //      > 0 non-full banks
@@ -156,7 +158,9 @@ static void flush_queue(char epnum, char flag) {
     // FIXME hack to get it to transmit when queue is empty
     UEINTX &= ~_BV(TXINI);
     // disable IN interrupts
-    UEIENX &= ~_BV(TXINE);
+    if(QUEUE_EMPTY(q)) {
+        UEIENX &= ~_BV(TXINE);
+    }
     // flush bank (short packet write at end of xfer)
     // TODO we might not want to do this if the entire transfer made by the
     // application does not fit in the queue: could lead to early-aborts on
@@ -223,7 +227,6 @@ void write_usb_ep(int epnum) {
 void read_usb_ep(int epnum) {
 }
 
-static bool have_sent_config_hdr = false;
 void handle_setup(usb_ep_ctx_t *ctx) {
     union {
         usb_req_hdr_t hdr;
@@ -231,6 +234,17 @@ void handle_setup(usb_ep_ctx_t *ctx) {
         usb_req_val_t val;
         usb_req_get_desc_t get_desc;
     } *req;
+    if(flush_lock) {
+        if(QUEUE_EMPTY(&ep0_queue)) {
+            flush_lock = false;
+            UEINTX &= ~_BV(TXINE);
+        }
+        else {
+            // enable tx interrupt and exit until queue is flushed.
+            UEINTX |= _BV(TXINE);
+            return;
+        }
+    }
     req = ep0_buf;
     // XXX: reset queue write ptr so we overwrite data w/o calling pop
     QUEUE_RESET(&ep0_queue);
@@ -243,6 +257,7 @@ void handle_setup(usb_ep_ctx_t *ctx) {
                     for(size_t i = 0; i < sizeof(usb_device_desc_t); i++) {
                         queue_push(&ep0_queue, ((uint_least8_t *)&self_device_desc)[i]);
                     }
+                    flush_lock = true;
                     // enable IN interrupts after SETUP
                     UEIENX |= _BV(TXINE);
                     /*write_usb_ep(0);*/
@@ -253,22 +268,30 @@ void handle_setup(usb_ep_ctx_t *ctx) {
                      */
                 break;
 
-#if 0
                 case USB_DESC_CONFIGURATION:
-                    if(!have_sent_config_hdr) {
+                    uart_puts("config\r\n", 7);
+                    if(req->std.wLength == sizeof(usb_config_desc_t)) {
                         // send just the config desc first
-                        mqueue_init(&ep0_out, ((uint_least8_t *)&self_config_desc), sizeof(usb_config_desc_t));
-                        write_usb_ep(0, &ep0_out);
-                        have_sent_config_hdr = true;
+                        for(size_t i = 0; i < sizeof(usb_config_desc_t); i++) {
+                            queue_push(&ep0_queue, ((uint_least8_t *)&self_config_desc)[i]);
+                        }
+                        flush_lock = true;
+                        UEIENX |= _BV(TXINE);
                     }
                     else {
                         // then send entire configuration (repeating the config desc)
-                        mqueue_init(&ep0_out, ((uint_least8_t *)&self_config_desc), sizeof(acm_config_desc_t));
-                        write_usb_ep(0, &ep0_out);
+                        for(size_t i = 0; i < sizeof(acm_config_desc_t); i++) {
+                            queue_push(&ep0_queue, ((uint_least8_t *)&self_config_desc)[i]);
+                            if(!ep0_queue.op_ok) {
+                                uart_puts("fail\r\n", 6);
+                            }
+                        }
+                        flush_lock = true;
+                        UEIENX |= _BV(TXINE);
                     }
-                    UEINTX = ~_BV(TXINI);
                 break;
 
+#if 0
                 case USB_DESC_STRING:
                 // TODO on hold until utf16-le encoding is ready
                     /*
@@ -276,28 +299,26 @@ void handle_setup(usb_ep_ctx_t *ctx) {
                      *UEINTX = ~_BV(TXINI);
                      */
                 break;
-
-                default:
-                    /*uart_puts("unsupported desc\n", 16);*/
-                break;
 #endif
+                default:
+                    uart_puts("unsupported desc\n", 16);
+                break;
             }
-        break;
+        break; // END DESC REQUESTS
 
-#if 0
         case USB_REQ_SET_ADDRESS:
+            uart_puts("addr\n", 5);
+            // TODO async this, make it wait on a flag.
             UEINTX = ~_BV(TXINI);
             // wait for IN packet before setting address
             addr = req->std.wValue;
             while(!(UEINTX & _BV(TXINI)));
             UDADDR = addr | _BV(ADDEN);
-            /*uart_puts("addr\n", 5);*/
         break;
 
-#endif
-
         default:
-            uart_puts("unsupported req\r\n", 16);
+            uart_puts("unsupported req\r\n", 17);
+            uart_puts(&ep0_buf, 64);
             break;
     }
 }
@@ -371,12 +392,12 @@ ISR(USB_COM_vect) {
         if(events & _BV(RXSTPI)) {
             // setup transfer sends host->dev data, but RXOUTI is not triggered.
             // endpoint will contain the request descriptor
-            uart_puts("setup\r\n", 7);
+            uart_puts("SETUP\r\n", 7);
             fill_queue(0, _BV(RXSTPI));
         }
         else if(events & _BV(TXINI)) {
             // IN transfer
-            uart_puts("write\r\n", 7);
+            uart_puts("IN\r\n", 4);
             /*UEINTX &= ~ _BV(TXINI);*/
             // TODO statefully detect if we are doing setup or normal operation,
             // and change the "flag" argument accordingly.
@@ -384,7 +405,7 @@ ISR(USB_COM_vect) {
         }
         if(events & _BV(RXOUTI)) {
             // OUT transfer
-            uart_puts("read\r\n", 6);
+            uart_puts("OUT\r\n", 5);
             UEINTX &= ~ _BV(RXOUTI);
             fill_queue(0, _BV(FIFOCON));
         }

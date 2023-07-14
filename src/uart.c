@@ -3,6 +3,7 @@
 
 #include <avr/io.h>
 #include <avr/interrupt.h>
+#include <util/atomic.h>
 
 /**
  * Convenience macro to enable transmission - enables interrupt on UDRE0 = 1
@@ -50,7 +51,6 @@ void uart_puts(char *data, int len) {
 
 int uart_puts_noblock(char *data, int len) {
     int i = 0;
-    /*cli();*/
     while(i < len) {
         queue_push(&uart_tx, data[i]);
         if(!uart_tx.op_ok) {
@@ -60,7 +60,6 @@ int uart_puts_noblock(char *data, int len) {
     }
     uart_tx.op_ok = true;
     uart_en_tx();
-    /*sei();*/
     return i;
 }
 

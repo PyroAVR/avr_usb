@@ -22,14 +22,14 @@ typedef struct {
 typedef struct {
     usb_config_desc_t self_config_desc;
     usb_assoc_desc_t iad;
-    // begin ACM Functional Descriptor
-    usb_cdc_header_func_desc_t cdc_header;
-    usb_cdc_acm_func_desc_t acm_desc;
-    custom_cdc_union_t cdc_union;
-    usb_cdc_call_mgmt_desc_t cdc_call_mgmt;
-    // end
     // begin CDC Communication interface
     usb_interface_desc_t if_comm;
+    // begin ACM Functional Descriptor
+    usb_cdc_header_func_desc_t cdc_header;
+    usb_cdc_call_mgmt_desc_t cdc_call_mgmt;
+    usb_cdc_acm_func_desc_t acm_desc;
+    custom_cdc_union_t cdc_union;
+    // end
     usb_endpoint_desc_t mgmt_ep;
     // TODO what does this do?
     //usb_endpoint_desc_t notification_ep;

@@ -64,6 +64,85 @@ static void clock_init(void) {
     PLLFRQ = _BV(PLLUSB) | _BV(PLLTM1) | 0xA;
 }
 
+// ACM STUFF
+#define EP1_LEN 16
+#define EP2_LEN 64
+#define EP3_LEN 64
+static void out_handler(usb_ep_ctx_t *ctx);
+static void in_handler(usb_ep_ctx_t *ctx);
+static void config_handler(usb_ep_ctx_t *ctx);
+char ep1_buf[EP1_LEN];
+char ep2_buf[EP2_LEN];
+char ep3_buf[EP3_LEN];
+queue_t ep1_queue;
+queue_t ep2_queue;
+queue_t ep3_queue;
+
+usb_ep_ctx_t ep1_handler = {
+    .callback = config_handler,
+    .data = &ep1_queue,
+    .flags = 0
+};
+usb_ep_ctx_t ep2_handler = {
+    .callback = in_handler,
+    .data = &ep2_queue,
+    .flags = 0
+};
+usb_ep_ctx_t ep3_handler = {
+    .callback = out_handler,
+    .data = &ep3_queue,
+    .flags = 0
+};
+static void out_handler(usb_ep_ctx_t *ctx) {
+    // HAX nack out transactions by doing nothing
+}
+static void config_handler(usb_ep_ctx_t *ctx) {
+    // stub
+}
+static char msg[] = "the cake is a lie\r\n";
+static size_t msg_len = sizeof(msg);
+static void in_handler(usb_ep_ctx_t *ctx) {
+    int i = 0;
+    if(is_flush_locked(2)) {
+        return;
+    }
+    while(!QUEUE_FULL(&ep2_queue)) {
+        queue_push(&ep2_queue, msg[i]);
+        i = (i == msg_len)? 0:i+1;
+    }
+    set_flush_lock(2);
+}
+
+static void configure_acm_bulk(void) {
+    // reset sw queues
+    queue_init(&ep1_queue, ep1_buf, EP1_LEN);
+    queue_init(&ep2_queue, ep2_buf, EP2_LEN);
+    queue_init(&ep3_queue, ep3_buf, EP3_LEN);
+
+    UERST |= (7 << 1); // reset endpoints 1-3
+    UERST &= ~(7 << 1); // release reset state
+    UENUM = 1;
+    UECONX |= _BV(EPEN);
+    UECFG0X = 0;
+    UECFG1X |= (16 << EPSIZE0) | _BV(ALLOC);
+
+    UENUM = 2;
+    UECONX |= _BV(EPEN);
+    UECFG0X = (2 << EPTYPE0) | _BV(EPDIR); // IN endpoint
+    UECFG1X |= (16 << EPSIZE0) | _BV(ALLOC); // 16 byte hw queue
+
+    UENUM = 3;
+    UECONX |= _BV(EPEN);
+    UECFG0X = (2 << EPTYPE0); // OUT endpoint
+    UECFG1X |= (16 << EPSIZE0) | _BV(ALLOC); // 16 byte hw queue
+    
+    atmega_xu4_install_ep_handler(1, &ep1_handler);
+    atmega_xu4_install_ep_handler(2, &ep2_handler);
+    atmega_xu4_install_ep_handler(3, &ep3_handler);
+}
+
+// END ACM STUFF
+
 
 void atmega_xu4_setup_usb(void) {
 
@@ -302,13 +381,16 @@ void handle_setup(usb_ep_ctx_t *ctx) {
 
         case USB_REQ_SET_CONFIGURATION:
             // TODO handle actual configuration, this just ACKs the req.
+            uart_puts("set conf\r\n", 10);
             UEINTX = ~_BV(TXINI);
+            configure_acm_bulk();
         break;
 
         case USB_REQ_GET_STATUS:
             // TODO endpoint vs. interface status
             // TODO actual rm-wake and self-power status
             // this indicates no rm-wake and bus-powered.
+            uart_puts("status\r\n", 8);
             queue_push(&ep0_queue, 0);
             queue_push(&ep0_queue, 0);
             set_flush_lock(0);
@@ -366,14 +448,6 @@ ISR(USB_COM_vect) {
     if(eps_to_service & 1) {
         UENUM = 0;
         uint8_t events = UEINTX;
-        /*bool is_control_ep = UECFG0X & (3 << 6) ? false : true;*/
-        /*
-         *uint8_t uecfg0x = UECFG0X;
-         *ep_xfer_stat.fields.ep_type = (uecfg0x & (3 << 6)) >> 6;
-         *ep_xfer_stat.fields.ctrl_dir = UESTA1X & _BV(CTRLDIR);
-         *ep_xfer_stat.fields.in_xfer = UEINTX & 1;
-         *ep_xfer_stat.fields.ep_dir = uecfg0x & (1);
-         */
 #if 0
         // TODO this exits if r/w is not allowed on non-control endpoints...
         // but that flag is based on the current bank (I think).
@@ -386,7 +460,7 @@ ISR(USB_COM_vect) {
         if(events & _BV(RXSTPI)) {
             // setup transfer sends host->dev data, but RXOUTI is not triggered.
             // endpoint will contain the request descriptor
-            uart_puts("SETUP\r\n", 7);
+            uart_puts("SETUP0\r\n", 8);
             handle_control(0);
         }
         else if(events & _BV(TXINI)) {
@@ -410,6 +484,36 @@ ISR(USB_COM_vect) {
         }
         usb_ep_handlers[0]->callback(usb_ep_handlers[0]);
         /*UEINTX &= ~events;*/
+    }
+    if(eps_to_service & (1 << 1)) {
+        UENUM = 0;
+        uint8_t events = UEINTX;
+        if(events & _BV(RXSTPI)) {
+            // setup transfer sends host->dev data, but RXOUTI is not triggered.
+            // endpoint will contain the request descriptor
+            uart_puts("SETUP1\r\n", 8);
+            handle_control(1);
+        }
+        usb_ep_handlers[1]->callback(usb_ep_handlers[1]);
+    }
+    if(eps_to_service & (1 << 2)) {
+        UENUM = 0;
+        uint8_t events = UEINTX;
+        if(events & _BV(TXINI)) {
+            // IN transfer
+            uart_puts("IN\r\n", 4);
+            // clear TXINI for control endpoints, else FIFOCON
+            // TODO flush also needs to repeatedly clear TXINI for non-setup
+            // transactions.
+            // may still need to statefully track setup, re:
+            //  - txini vs. fifocon clearing (or both)
+            //  - abort stage for IN packets during setup (control transfer)
+            //  - whether or not to clear FIFOCON on OUT transactions
+            //      - CONTROL endpoints are not allowed to use FIFOCON/RWAL or
+            //        double-buffering, for some reason.
+            flush_queue(0);
+        }
+        usb_ep_handlers[2]->callback(usb_ep_handlers[2]);
     }
 }
 

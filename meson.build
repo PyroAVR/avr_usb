@@ -17,6 +17,7 @@ c_sources = [
     'src/usb_descriptors.c',
     'src/monoqueue.c',
     'src/32u4_usb.c',
+    'src/usb_std.c',
 ]
 
 # List of ASM sources to compile.  Relative to project root.

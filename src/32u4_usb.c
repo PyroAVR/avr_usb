@@ -19,8 +19,6 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-#define NUM_EPS 6
-
 #define min(x, y) (((x) > (y)) ? (y):(x))
 
 static inline void set_flush_lock(uint8_t epnum);
@@ -32,7 +30,7 @@ static void handle_setup(uint8_t epnum);
 static void clock_init(void);
 
 // array of endpoint handlers
-static volatile usb_ep_ctx_t *usb_ep_handlers[NUM_EPS];
+static volatile usb_ep_ctx_t *usb_ep_handlers[NUM_EPS] = {0};
 
 void atmega_xu4_start_usb(void) {
 
@@ -54,6 +52,10 @@ void atmega_xu4_start_usb(void) {
 void atmega_xu4_set_ep_queue(char epnum, queue_t *data) {
     QUEUE_RESET(data);
     usb_ep_handlers[epnum]->data = data;
+}
+
+void atmega_xu4_set_ep_ctx(char epnum, usb_ep_ctx_t *ctx) {
+    usb_ep_handlers[epnum] = ctx;
 }
 
 int usb_ep_write(int epnum, char *buf, size_t len) {
@@ -201,8 +203,14 @@ ISR(USB_COM_vect) {
                 // TODO other possible events: NAKINI, NAKOUTI, STALLEDI
                 uart_puts("OTHER\r\n", 7);
             }
-            UEINTX &= ~events;
-            usb_ep_handlers[i]->callback(usb_ep_handlers[i]->cb_ctx, tok);
+            /*UEINTX &= ~events;*/
+            if(usb_ep_handlers[i]->callback != NULL) {
+                uart_puts("cb\r\n", 4);
+                usb_ep_handlers[i]->callback(usb_ep_handlers[i]->cb_ctx, tok);
+            }
+            else {
+                uart_puts("!cb\r\n", 5);
+            }
         }
     }
 }

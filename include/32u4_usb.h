@@ -17,6 +17,10 @@
  * to read directly from an external buffer.
  */
 
+#if defined(__AVR_ATmega32U4__)
+#define NUM_EPS 6
+#endif
+
 typedef struct usb_ep_ctx_S usb_ep_ctx_t;
 
 typedef enum {
@@ -36,3 +40,10 @@ struct usb_ep_ctx_S {
 void atmega_xu4_start_usb(void);
 
 void atmega_xu4_set_ep_queue(char epnum, queue_t *data);
+
+/**
+ * Set storage location for the given handler.
+ * The driver allocates sufficient static data to cover a pointer to a single
+ * handler for each endpoint.
+ */
+void atmega_xu4_set_ep_ctx(char epnum, usb_ep_ctx_t *ctx);

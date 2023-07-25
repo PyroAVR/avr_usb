@@ -25,6 +25,10 @@ __attribute__((aligned(4)))
 char ep0_buf[EP0_LEN];
 queue_t ep0_queue;
 
+usb_ep_ctx_t contexts[NUM_EPS] = {
+    [0 ... NUM_EPS-1] = {0}
+};
+
 // default endpoint 0 handler
 usb_std_req_ctx_t ep0_std_ctx = {
     .next = NULL, // TODO fill w/ ACM handler
@@ -41,6 +45,7 @@ int main(void) {
     configure_uart(115200, uart_bufs[0], uart_bufs[1], 512, 512);
 
     // connect setup / control handler to ep0
+    atmega_xu4_set_ep_ctx(0, &contexts[0]);
     queue_init(&ep0_queue, ep0_buf, EP0_LEN);
     atmega_xu4_set_ep_queue(0, &ep0_queue);
     usb_ep_set_callback(0, (usb_ep_cb*)usb_std_req_handler, &ep0_std_ctx);

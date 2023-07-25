@@ -47,11 +47,17 @@ void usb_std_req_handler(usb_std_req_ctx_t *ctx, usb_token_t token) {
         break;
 
         case USB_STD_STATE_AWAIT_IN_ADDR:
-            uart_puts("await addr\r\n", 12);
+            uart_puts("await addr", 10);
             if(token & IN) {
+                uart_puts(" set\r\n", 6);
+                UENUM = 0;
+                UEINTX &= ~_BV(TXINI);
                 usb_set_addr(ctx->addr);
             }
-            // called for some other event - do not set address, but return
+            else {
+                uart_puts(" not set\r\n", 10);
+            }
+            // else, called for some other event - do not set address, but return
             // to default state
             ctx->state = USB_STD_STATE_SETUP;
             return;
@@ -76,12 +82,12 @@ static void handle_std_request(usb_std_req_ctx_t *ctx, usb_req_t *req) {
         case USB_REQ_SET_ADDRESS:
             uart_puts("addr\n", 5);
             // wait for IN packet before setting address
-            UENUM = 0;
-            UEINTX &= ~_BV(TXINI);
+            /*UENUM = 0;*/
+            /*UEINTX &= ~_BV(TXINI);*/
             ctx->addr = req->std.wValue;
-            while(!(UEINTX & _BV(TXINI)));
+            /*while(!(UEINTX & _BV(TXINI)));*/
             ctx->state = USB_STD_STATE_AWAIT_IN_ADDR;
-            usb_set_addr(ctx->addr);
+            /*usb_set_addr(ctx->addr);*/
         break;
 
         case USB_REQ_SET_CONFIGURATION:

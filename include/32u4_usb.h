@@ -33,4 +33,6 @@ struct usb_ep_ctx_S {
     volatile char flags;
 };
 
-void atmega_xu4_setup_usb(void);
+void atmega_xu4_start_usb(void);
+
+void atmega_xu4_set_ep_queue(char epnum, queue_t *data);

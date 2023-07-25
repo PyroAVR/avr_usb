@@ -40,19 +40,22 @@ int main(void) {
     PORTC &= ~(1 << 7); // disable pullup
     configure_uart(115200, uart_bufs[0], uart_bufs[1], 512, 512);
 
-    atmega_xu4_setup_usb();
     // connect setup / control handler to ep0
     queue_init(&ep0_queue, ep0_buf, EP0_LEN);
+    atmega_xu4_set_ep_queue(0, &ep0_queue);
     usb_ep_set_callback(0, (usb_ep_cb*)usb_std_req_handler, &ep0_std_ctx);
+
+    atmega_xu4_start_usb();
 
     sei();
     for(;;) {
+        uart_puts("test\r\n", 6);
+        // heartbeat led
         PINC |= (1 << 7); // writing logical 1 to PIN toggles PORT (refman. 10.2.2)
         _delay_ms(500);
         // don't remove these... haven't figured out where they're supposed to be yet
         USBCON &= ~_BV(FRZCLK);
         UDCON &= ~_BV(DETACH);
-        // heartbeat led
 
     }
     return 0;

@@ -34,7 +34,7 @@ static void clock_init(void);
 // array of endpoint handlers
 static volatile usb_ep_ctx_t *usb_ep_handlers[NUM_EPS];
 
-void atmega_xu4_setup_usb(void) {
+void atmega_xu4_start_usb(void) {
 
     clock_init();
 
@@ -51,10 +51,15 @@ void atmega_xu4_setup_usb(void) {
     UDCON &= ~_BV(DETACH);
 }
 
+void atmega_xu4_set_ep_queue(char epnum, queue_t *data) {
+    QUEUE_RESET(data);
+    usb_ep_handlers[epnum]->data = data;
+}
+
 int usb_ep_write(int epnum, char *buf, size_t len) {
     int bytecount = 0;
     queue_t *q = usb_ep_handlers[epnum]->data;
-    while(bytecount < min(len, (q->cap - q->size))) {
+    while(bytecount < min(len, QUEUE_AVAIL(q))) {
         ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
             queue_push(q, buf[bytecount++]);
         }
@@ -121,7 +126,7 @@ ISR(USB_GEN_vect) {
     if(UDINT & _BV(EORSTI)) {
         // usb reset
         UDINT &= ~_BV(EORSTI);
-        /*uart_puts("reset\n", 6);*/
+        uart_puts("reset\n", 6);
 
         // enable only ep 0
         UENUM = 0;
@@ -130,7 +135,7 @@ ISR(USB_GEN_vect) {
         UECFG1X = _BV(EPSIZE0) | _BV(EPSIZE1) | _BV(ALLOC); // 64 byte buffer
         UEIENX |= _BV(RXSTPE) | _BV(RXOUTI); // enable useful interrupts only
         if(!(UESTA0X & _BV(CFGOK))) {
-            /*uart_puts("failed\n", 7);*/
+            uart_puts("failed\n", 7);
             return;
         }
         UERST = 0;
@@ -139,17 +144,17 @@ ISR(USB_GEN_vect) {
         USBINT &= ~_BV(VBUSTI);
         /*UDIEN |= _BV(WAKEUPE) | _BV(SUSPE);*/
         UDCON &= ~_BV(DETACH);
-        /*uart_puts("vbus\n", 5);*/
+        uart_puts("vbus\n", 5);
     }
     if(UDINT & _BV(WAKEUPI)) {
         UDINT &= ~_BV(WAKEUPI);
         USBCON &= ~_BV(FRZCLK);
-        /*uart_puts("wake\n", 5);*/
+        uart_puts("wake\n", 5);
     }
     if(UDINT & _BV(SUSPI)) {
         UDINT &= ~_BV(SUSPI);
         USBCON &= ~_BV(FRZCLK);
-        /*uart_puts("susp\n", 5);*/
+        uart_puts("susp\n", 5);
     }
 }
 
@@ -159,12 +164,14 @@ ISR(USB_COM_vect) {
     usb_token_t tok = 0;
 
     UEINT &= ~eps_to_service;
+    uart_puts("COM\r\n", 5);
     for(int i = 0; i < NUM_EPS; i++) {
 
         if(eps_to_service & _BV(i)) {
             UENUM = i;
             uint8_t events = UEINTX;
             if(events & _BV(RXSTPI)) {
+                uart_puts("SETUP\r\n", 7);
                 // SETUP transfer setup transfer sends host->dev data, but
                 // RXOUTI is not triggered. endpoint will contain the request
                 // descriptor
@@ -172,6 +179,7 @@ ISR(USB_COM_vect) {
                 tok |= SETUP;
             }
             else if(events & _BV(TXINI)) {
+                uart_puts("IN\r\n", 4);
                 // IN transfer clear TXINI for control endpoints, else FIFOCON
                 // TODO flush also needs to repeatedly clear TXINI for
                 // non-setup transactions. may still need to statefully track
@@ -184,15 +192,17 @@ ISR(USB_COM_vect) {
                 tok |= IN;
             }
             else if(events & _BV(RXOUTI)) {
+                uart_puts("OUT\r\n", 5);
                 // OUT transfer
                 fill_queue(i);
                 tok |= OUT;
             }
             else {
                 // TODO other possible events: NAKINI, NAKOUTI, STALLEDI
+                uart_puts("OTHER\r\n", 7);
             }
-            usb_ep_handlers[i]->callback(usb_ep_handlers[i], tok);
-            /*UEINTX &= ~events;*/
+            UEINTX &= ~events;
+            usb_ep_handlers[i]->callback(usb_ep_handlers[i]->cb_ctx, tok);
         }
     }
 }
@@ -226,7 +236,7 @@ static inline void handle_setup(uint8_t epnum) {
     UENUM = epnum;
     QUEUE_RESET(q);
     char c;
-    if(q->cap < UEBCX) {
+    if(QUEUE_AVAIL(q) < UEBCX) {
         // not enough space in the sw queue - stall to indicate failure to host
         usb_ep_set_stall(epnum, true);
     }

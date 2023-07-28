@@ -22,6 +22,15 @@ typedef enum {
     NAK = 16, // set in conjunction with IN or OUT
 } usb_token_t;
 
+enum {
+    USB_INT_IN = 1,
+    USB_INT_OUT = 2,
+    USB_INT_NAKIN = 4,
+    USB_INT_NAKOUT = 8,
+    USB_INT_STALLRQ = 16,
+    USB_INT_FLOW = 32, // under or over - type known via ep direction
+};
+
 typedef void (usb_ep_cb)(void *ctx, usb_token_t token);
 
 /**
@@ -86,8 +95,11 @@ void usb_ep_set_stall(int epnum, bool stall);
  * associated endpoint.
  *
  * Interrupts shall be re-enabled for the endpoint when processing may continue.
+ *
+ * mask: only set bits are considered.
  */
-void usb_ep_set_interrupts(int epnum, char int_flags);
+void usb_ep_set_interrupts(int epnum, int mask);
+void usb_ep_clear_interrupts(int epnum, int mask);
 
 /**
  * Set the address of the USB peripheral

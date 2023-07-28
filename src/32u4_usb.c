@@ -29,6 +29,7 @@ static void flush_queue(uint8_t epnum);
 static void flush_queue_ctrl(uint8_t epnum);
 static void handle_setup(uint8_t epnum);
 static void clock_init(void);
+static int usb_convert_iflags(int mask);
 
 // array of endpoint handlers
 static volatile usb_ep_ctx_t *usb_ep_handlers[NUM_EPS] = {0};
@@ -125,7 +126,44 @@ void usb_set_addr(uint8_t address) {
     // TRM 22.7 "ADDEN and UADD shall not be written at the same time"
     UDADDR = address |= _BV(ADDEN);
 }
+void usb_ep_set_interrupts(int epnum, int mask) {
+    int iflags = usb_convert_iflags(mask);
+    ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
+        UENUM = epnum;
+        UEIENX |= iflags;
+    }
+}
 
+void usb_ep_clear_interrupts(int epnum, int mask) {
+    int iflags = usb_convert_iflags(mask);
+    ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
+        UENUM = epnum;
+        UEIENX &= ~iflags;
+    }
+}
+
+static int usb_convert_iflags(int mask) {
+    int iflags = 0;
+    if(mask & USB_INT_IN) {
+        iflags |= _BV(TXINE);
+    }
+    if(mask & USB_INT_OUT) {
+        iflags |= _BV(RXOUTE);
+    }
+    if(mask & USB_INT_NAKIN) {
+        iflags |= _BV(NAKINE);
+    }
+    if(mask & USB_INT_NAKOUT) {
+        iflags |= _BV(NAKOUTE);
+    }
+    if(mask & USB_INT_FLOW) {
+        iflags |= _BV(FLERRE);
+    }
+    if(mask & USB_INT_STALLRQ) {
+        iflags |= _BV(STALLEDE);
+    }
+    return iflags;
+}
 
 // USB general interrupt
 ISR(USB_GEN_vect) {

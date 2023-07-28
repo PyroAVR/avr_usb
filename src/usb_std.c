@@ -56,6 +56,7 @@ void usb_std_req_handler(usb_std_req_ctx_t *ctx, usb_token_t token) {
                 UEINTX &= ~_BV(TXINI);
                 /*usb_ep_flush(0);*/
                 usb_set_addr(ctx->addr);
+                QUEUE_RESET(ctx->ep_queue);
             }
             else {
                 uart_puts(" not set\r\n", 10);
@@ -85,12 +86,9 @@ static void handle_std_request(usb_std_req_ctx_t *ctx, usb_req_t *req) {
         case USB_REQ_SET_ADDRESS:
             uart_puts("addr\n", 5);
             // wait for IN packet before setting address
-            UENUM = 0;
-            UEINTX &= ~_BV(TXINI);
             ctx->addr = req->std.wValue;
-            while(!(UEINTX & _BV(TXINI)));
-            /*ctx->state = USB_STD_STATE_AWAIT_IN_ADDR;*/
-            usb_set_addr(ctx->addr);
+            usb_ep_set_interrupts(0, USB_INT_IN);
+            ctx->state = USB_STD_STATE_AWAIT_IN_ADDR;
         break;
 
         case USB_REQ_SET_CONFIGURATION:
@@ -124,6 +122,7 @@ static void handle_get_desc(usb_std_req_ctx_t *ctx, usb_req_t *req) {
         case USB_DESC_DEVICE:
             uart_puts("device\r\n", 8);
             usb_ep_write(0, &self_device_desc, sizeof(usb_device_desc_t));
+            usb_ep_set_interrupts(0, USB_INT_IN);
             usb_ep_flush(0);
             ctx->state = USB_STD_STATE_AWAIT_FLUSH;
         break;

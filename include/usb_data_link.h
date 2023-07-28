@@ -19,6 +19,7 @@ typedef enum {
     OUT = 2,
     SETUP = 4,
     STALL = 8,
+    NAK = 16, // set in conjunction with IN or OUT
 } usb_token_t;
 
 typedef void (usb_ep_cb)(void *ctx, usb_token_t token);
@@ -64,7 +65,6 @@ bool usb_ep_data_ready(int epnum);
  * return value: true on success, false for invalid arguments
  */
 bool usb_ep_set_callback(int epnum, usb_ep_cb *cb, void *ctx);
-
 
 /**
  * Set or clear a stall on the given endpoint. A STALL packet will be returned

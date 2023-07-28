@@ -25,7 +25,10 @@ typedef struct usb_ep_ctx_S usb_ep_ctx_t;
 
 typedef enum {
     EP_FLUSH = 1,
-} usb_ep_flags;
+    // TODO abort detection
+    EP_XFER_STATE_IN = 2,
+    EP_XFER_STATE_OUT = 4,
+} atmega32u4_usb_ep_flags;
 
 struct usb_ep_ctx_S {
     // callbacks will run in the ISR context / with its priority.

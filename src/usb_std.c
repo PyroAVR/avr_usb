@@ -13,24 +13,26 @@ static void handle_get_desc(usb_std_req_ctx_t *ctx, usb_req_t *req);
 
 void usb_std_req_handler(usb_std_req_ctx_t *ctx, usb_token_t token) {
     usb_req_t *req;
-    uart_puts("std: ", 5);
+    /*uart_puts("std: ", 5);*/
     switch(ctx->state) {
         case USB_STD_STATE_AWAIT_FLUSH:
             uart_puts("await flush\r\n", 13);
-            if(usb_ep_flush_complete(0)) {
+            if(!usb_ep_flush_complete(0)) {
                 // with ideal driver configuration, this should never be hit -
                 // handlers are only called when their requested event is avail.
+                uart_puts(" still\r\n", 8);
                 return;
             }
             else {
                 // return to setup state post-flush: a completed flush implies
                 // the next packet will be SETUP.
+                uart_puts("to setup\r\n", 10);
                 ctx->state = USB_STD_STATE_SETUP;
             }
         break;
 
         case USB_STD_STATE_SETUP:
-            uart_puts("setup\r\n", 7);
+            /*uart_puts("setup\r\n", 7);*/
 #if defined(__AVR_ATmega32U4__)
             // directly access buffer: control transfers always reset the queue
             req = ctx->ep_queue->buffer;
@@ -52,6 +54,7 @@ void usb_std_req_handler(usb_std_req_ctx_t *ctx, usb_token_t token) {
                 uart_puts(" set\r\n", 6);
                 UENUM = 0;
                 UEINTX &= ~_BV(TXINI);
+                /*usb_ep_flush(0);*/
                 usb_set_addr(ctx->addr);
             }
             else {
@@ -82,12 +85,12 @@ static void handle_std_request(usb_std_req_ctx_t *ctx, usb_req_t *req) {
         case USB_REQ_SET_ADDRESS:
             uart_puts("addr\n", 5);
             // wait for IN packet before setting address
-            /*UENUM = 0;*/
-            /*UEINTX &= ~_BV(TXINI);*/
+            UENUM = 0;
+            UEINTX &= ~_BV(TXINI);
             ctx->addr = req->std.wValue;
-            /*while(!(UEINTX & _BV(TXINI)));*/
-            ctx->state = USB_STD_STATE_AWAIT_IN_ADDR;
-            /*usb_set_addr(ctx->addr);*/
+            while(!(UEINTX & _BV(TXINI)));
+            /*ctx->state = USB_STD_STATE_AWAIT_IN_ADDR;*/
+            usb_set_addr(ctx->addr);
         break;
 
         case USB_REQ_SET_CONFIGURATION:
@@ -106,6 +109,7 @@ static void handle_std_request(usb_std_req_ctx_t *ctx, usb_req_t *req) {
             uart_puts("status\r\n", 8);
             usb_ep_write(0, device_status, 2);
             usb_ep_flush(0);
+            ctx->state = USB_STD_STATE_AWAIT_FLUSH;
         break;
 
         default:
@@ -120,14 +124,8 @@ static void handle_get_desc(usb_std_req_ctx_t *ctx, usb_req_t *req) {
         case USB_DESC_DEVICE:
             uart_puts("device\r\n", 8);
             usb_ep_write(0, &self_device_desc, sizeof(usb_device_desc_t));
-            /*
-             *for(size_t i = 0; i < sizeof(usb_device_desc_t); i++) {
-             *    queue_push(&ep0_queue, ((uint_least8_t *)&self_device_desc)[i]);
-             *}
-             */
             usb_ep_flush(0);
             ctx->state = USB_STD_STATE_AWAIT_FLUSH;
-            // enable IN interrupts after SETUP
         break;
 
         case USB_DESC_CONFIGURATION:

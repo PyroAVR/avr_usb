@@ -26,6 +26,7 @@ static inline void clear_flush_lock(uint8_t epnum);
 static inline bool is_flush_locked(uint8_t epnum);
 static void fill_queue(uint8_t epnum);
 static void flush_queue(uint8_t epnum);
+static void flush_queue_ctrl(uint8_t epnum);
 static void handle_setup(uint8_t epnum);
 static void clock_init(void);
 
@@ -66,6 +67,11 @@ int usb_ep_write(int epnum, char *buf, size_t len) {
             queue_push(q, buf[bytecount++]);
         }
     }
+    if(bytecount) {
+        // enable TXINE
+        UENUM = epnum;
+        UEIENX |= _BV(TXINE);
+    }
     return bytecount;
 }
 
@@ -92,9 +98,8 @@ bool usb_ep_set_callback(int epnum, usb_ep_cb *cb, void *ctx) {
 }
 
 bool usb_ep_flush(int epnum) {
-    usb_ep_handlers[epnum]->flags |= (EP_FLUSH);
-    // TODO most times UENUM will already be set correctly. Avoid spurious
     // instrs by figuring out where to put these.
+    uart_puts("flushing\r\n", 10);
     set_flush_lock(epnum);
     return false; // TODO check NAKINI or sw status flag + if queue is empty
     /*return (UESTA0X & 0x3);*/
@@ -102,7 +107,7 @@ bool usb_ep_flush(int epnum) {
 
 bool usb_ep_flush_complete(int epnum) {
     // flush lock is only cleared after flush operation is complete
-    return is_flush_locked(epnum);
+    return !is_flush_locked(epnum);
 }
 
 
@@ -118,8 +123,7 @@ void usb_ep_set_stall(int epnum, bool stall) {
 
 void usb_set_addr(uint8_t address) {
     // TRM 22.7 "ADDEN and UADD shall not be written at the same time"
-    UDADDR = address;
-    UDADDR |= _BV(ADDEN);
+    UDADDR = address |= _BV(ADDEN);
 }
 
 
@@ -128,7 +132,7 @@ ISR(USB_GEN_vect) {
     if(UDINT & _BV(EORSTI)) {
         // usb reset
         UDINT &= ~_BV(EORSTI);
-        uart_puts("reset\n", 6);
+        /*uart_puts("reset\n", 6);*/
 
         // enable only ep 0
         UENUM = 0;
@@ -137,7 +141,7 @@ ISR(USB_GEN_vect) {
         UECFG1X = _BV(EPSIZE0) | _BV(EPSIZE1) | _BV(ALLOC); // 64 byte buffer
         UEIENX |= _BV(RXSTPE) | _BV(RXOUTI); // enable useful interrupts only
         if(!(UESTA0X & _BV(CFGOK))) {
-            uart_puts("failed\n", 7);
+            /*uart_puts("failed\n", 7);*/
             return;
         }
         UERST = 0;
@@ -146,17 +150,17 @@ ISR(USB_GEN_vect) {
         USBINT &= ~_BV(VBUSTI);
         /*UDIEN |= _BV(WAKEUPE) | _BV(SUSPE);*/
         UDCON &= ~_BV(DETACH);
-        uart_puts("vbus\n", 5);
+        /*uart_puts("vbus\n", 5);*/
     }
     if(UDINT & _BV(WAKEUPI)) {
         UDINT &= ~_BV(WAKEUPI);
         USBCON &= ~_BV(FRZCLK);
-        uart_puts("wake\n", 5);
+        /*uart_puts("wake\n", 5);*/
     }
     if(UDINT & _BV(SUSPI)) {
         UDINT &= ~_BV(SUSPI);
         USBCON &= ~_BV(FRZCLK);
-        uart_puts("susp\n", 5);
+        /*uart_puts("susp\n", 5);*/
     }
 }
 
@@ -166,14 +170,14 @@ ISR(USB_COM_vect) {
     usb_token_t tok = 0;
 
     UEINT &= ~eps_to_service;
-    uart_puts("COM\r\n", 5);
+    /*uart_puts("COM\r\n", 5);*/
     for(int i = 0; i < NUM_EPS; i++) {
-
+        tok = 0;
         if(eps_to_service & _BV(i)) {
             UENUM = i;
             uint8_t events = UEINTX;
             if(events & _BV(RXSTPI)) {
-                uart_puts("SETUP\r\n", 7);
+                /*uart_puts("SETUP\r\n", 7);*/
                 // SETUP transfer setup transfer sends host->dev data, but
                 // RXOUTI is not triggered. endpoint will contain the request
                 // descriptor
@@ -181,7 +185,7 @@ ISR(USB_COM_vect) {
                 tok |= SETUP;
             }
             else if(events & _BV(TXINI)) {
-                uart_puts("IN\r\n", 4);
+                /*uart_puts("IN\r\n", 4);*/
                 // IN transfer clear TXINI for control endpoints, else FIFOCON
                 // TODO flush also needs to repeatedly clear TXINI for
                 // non-setup transactions. may still need to statefully track
@@ -190,11 +194,11 @@ ISR(USB_COM_vect) {
                 // whether or not to clear FIFOCON on OUT transactions -
                 // CONTROL endpoints are not allowed to use FIFOCON/RWAL or
                 // double-buffering, for some reason.
-                flush_queue(i);
+                flush_queue_ctrl(i);
                 tok |= IN;
             }
             else if(events & _BV(RXOUTI)) {
-                uart_puts("OUT\r\n", 5);
+                /*uart_puts("OUT\r\n", 5);*/
                 // OUT transfer
                 fill_queue(i);
                 tok |= OUT;
@@ -203,13 +207,8 @@ ISR(USB_COM_vect) {
                 // TODO other possible events: NAKINI, NAKOUTI, STALLEDI
                 uart_puts("OTHER\r\n", 7);
             }
-            /*UEINTX &= ~events;*/
             if(usb_ep_handlers[i]->callback != NULL) {
-                uart_puts("cb\r\n", 4);
                 usb_ep_handlers[i]->callback(usb_ep_handlers[i]->cb_ctx, tok);
-            }
-            else {
-                uart_puts("!cb\r\n", 5);
             }
         }
     }
@@ -297,6 +296,37 @@ static void fill_queue(uint8_t epnum) {
 }
 
 /**
+ * Flush queue logic for control endpoints (no FIFOCON)
+ */
+static void flush_queue_ctrl(uint8_t epnum) {
+    queue_t *q = usb_ep_handlers[epnum]->data;
+    UENUM = epnum;
+    // sizes defined in TRM 22.18.2, UECFG1X section
+    size_t epsize = (UECFG1X & (0x7 << EPSIZE0)) >> EPSIZE0;
+    epsize = 1 << (epsize + 3);
+    size_t bytes_written = 0;
+    while(!QUEUE_EMPTY(q)) {
+        // space available in fifo
+        if(UEBCX < epsize) {
+            UEDATX = queue_pop(q);
+            bytes_written++;
+        }
+    }
+    if(bytes_written == epsize) {
+        // ack IN if hw fifo is full
+        UEINTX &= ~_BV(TXINI);
+    }
+    if(is_flush_locked(epnum) && QUEUE_EMPTY(q)) {
+        // clear flush lock
+        clear_flush_lock(0);
+        uart_puts("flushed\r\n", 9);
+        // send data currently in buffer
+        UEINTX &= ~_BV(TXINI);
+        // disable IN interrupts
+        UEIENX &= ~_BV(TXINE);
+    }
+}
+/**
  * Write from the software queue to DPRAM, writing at most
  * min(UECFG1X[EPSIZE], q->size) bytes.
  */
@@ -306,12 +336,14 @@ static void flush_queue(uint8_t epnum) {
     // sizes defined in TRM 22.18.2, UECFG1X section
     size_t epsize = (UECFG1X & (0x7 << EPSIZE0)) >> EPSIZE0;
     epsize = 1 << (epsize + 3);
+    size_t bytes_written = 0;
     while(!QUEUE_EMPTY(q)) {
         // space available in fifo
         if(UEBCX < epsize) {
             UEDATX = queue_pop(q);
+            bytes_written++;
         }
-        //      > 0 non-full banks
+        //      > 0 non-full banks: non-control endpoints w/ multibank
         else if(UESTA0X & 0x3) {
             // clear FIFOCON to switch banks (IN) or TXINI to start ACKing
             // IN packets (SETUP)
@@ -336,8 +368,10 @@ static void flush_queue(uint8_t epnum) {
             break;
         }
     }
-    // FIXME hack to get it to transmit when queue is empty
-    UEINTX &= ~_BV(TXINI);
+    if(bytes_written == epsize) {
+        // clear txini if usb buffer is full
+        UEINTX &= ~_BV(TXINI);
+    }
     // disable IN interrupts
     if(QUEUE_EMPTY(q)) {
         UEIENX &= ~_BV(TXINE);

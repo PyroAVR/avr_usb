@@ -36,6 +36,14 @@ usb_std_req_ctx_t ep0_std_ctx = {
     .state = USB_STD_STATE_SETUP
 };
 
+static bool run_handler = false;
+static usb_token_t recent_token;
+void schedule_handler(void *ctx, usb_token_t tok) {
+    (void)ctx;
+    run_handler = true;
+    recent_token = tok;
+}
+
 char uart_bufs[2][512] = {0};
 
 int main(void) {
@@ -48,11 +56,21 @@ int main(void) {
     atmega_xu4_set_ep_ctx(0, &contexts[0]);
     queue_init(&ep0_queue, ep0_buf, EP0_LEN);
     atmega_xu4_set_ep_queue(0, &ep0_queue);
-    usb_ep_set_callback(0, (usb_ep_cb*)usb_std_req_handler, &ep0_std_ctx);
+    /*usb_ep_set_callback(0, (usb_ep_cb*)usb_std_req_handler, &ep0_std_ctx);*/
+    usb_ep_set_callback(0, (usb_ep_cb *)schedule_handler, NULL);
 
     atmega_xu4_start_usb();
 
     sei();
+    for(;;) {
+        if(run_handler) {
+            uart_puts((char*)&recent_token, 1);
+            usb_std_req_handler(&ep0_std_ctx, recent_token);
+            run_handler = false;
+        }
+        asm("sleep");
+    }
+    return 0;
     for(;;) {
         uart_puts("test\r\n", 6);
         // heartbeat led

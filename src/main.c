@@ -48,6 +48,12 @@ char uart_bufs[2][512] = {0};
 
 int main(void) {
     cli();
+    // profiling pins:
+    // B4 = USB_COM_ISR
+    // B5 = TXINI
+    // B6 = RXOUTI
+    // B7 = schedule_handler
+    DDRB |= 0xF0;
     DDRC |= (1 << 7);
     PORTC &= ~(1 << 7); // disable pullup
     configure_uart(115200, uart_bufs[0], uart_bufs[1], 512, 512);

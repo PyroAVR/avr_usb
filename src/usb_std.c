@@ -7,11 +7,13 @@
 // DEBUG
 #include "drivers/uart.h"
 #include "avr/io.h"
+#include "avr/interrupt.h"
 
 static void handle_std_request(usb_std_req_ctx_t *ctx, usb_req_t *req);
 static void handle_get_desc(usb_std_req_ctx_t *ctx, usb_req_t *req);
 
 void usb_std_req_handler(usb_std_req_ctx_t *ctx, usb_token_t token) {
+    cli();
     usb_req_t *req;
     /*uart_puts("std: ", 5);*/
     switch(ctx->state) {
@@ -21,6 +23,7 @@ void usb_std_req_handler(usb_std_req_ctx_t *ctx, usb_token_t token) {
                 // with ideal driver configuration, this should never be hit -
                 // handlers are only called when their requested event is avail.
                 uart_puts(" still\r\n", 8);
+                sei();
                 return;
             }
             else {
@@ -42,6 +45,7 @@ void usb_std_req_handler(usb_std_req_ctx_t *ctx, usb_token_t token) {
             int size = usb_ep_read(0, ep0_buf, sizeof(ep0_buf));
             if(size < sizeof(ep0_buf)) {
                 // protocol invalid: setup packet is always eight bytes.
+                sei();
                 return;
             }
 #endif
@@ -52,8 +56,6 @@ void usb_std_req_handler(usb_std_req_ctx_t *ctx, usb_token_t token) {
             uart_puts("await addr", 10);
             if(token & IN) {
                 uart_puts(" set\r\n", 6);
-                UENUM = 0;
-                UEINTX &= ~_BV(TXINI);
                 /*usb_ep_flush(0);*/
                 usb_set_addr(ctx->addr);
                 QUEUE_RESET(ctx->ep_queue);
@@ -64,6 +66,8 @@ void usb_std_req_handler(usb_std_req_ctx_t *ctx, usb_token_t token) {
             // else, called for some other event - do not set address, but return
             // to default state
             ctx->state = USB_STD_STATE_SETUP;
+            PORTB &= ~_BV(PORTB7);
+            sei();
             return;
         break;
 
@@ -73,6 +77,7 @@ void usb_std_req_handler(usb_std_req_ctx_t *ctx, usb_token_t token) {
             uart_puts("default\r\n", 9);
         break;
     }
+    sei();
 }
 
 static void handle_std_request(usb_std_req_ctx_t *ctx, usb_req_t *req) {
@@ -87,6 +92,11 @@ static void handle_std_request(usb_std_req_ctx_t *ctx, usb_req_t *req) {
             uart_puts("addr\n", 5);
             // wait for IN packet before setting address
             ctx->addr = req->std.wValue;
+            // ack the NEXT in packet to tell host address is set, but don't
+            // actually set it until after that packet, otherwise usb peripheral
+            // will not receive the IN packet sent to address 0x00
+            UENUM = 0;
+            UEINTX &= ~_BV(TXINI);
             usb_ep_set_interrupts(0, USB_INT_IN);
             ctx->state = USB_STD_STATE_AWAIT_IN_ADDR;
         break;

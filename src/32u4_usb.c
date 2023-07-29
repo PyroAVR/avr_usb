@@ -20,11 +20,13 @@
 #include <stddef.h>
 
 #define min(x, y) (((x) > (y)) ? (y):(x))
+#define is_control_ep() ((UECFG0X & (3 << EPTYPE)) == 0)
 
 static inline void set_flush_lock(uint8_t epnum);
 static inline void clear_flush_lock(uint8_t epnum);
 static inline bool is_flush_locked(uint8_t epnum);
 static void fill_queue(uint8_t epnum);
+static void fill_queue_ctrl(uint8_t epnum);
 static void flush_queue(uint8_t epnum);
 static void flush_queue_ctrl(uint8_t epnum);
 static void handle_setup(uint8_t epnum);
@@ -124,7 +126,9 @@ void usb_ep_set_stall(int epnum, bool stall) {
 
 void usb_set_addr(uint8_t address) {
     // TRM 22.7 "ADDEN and UADD shall not be written at the same time"
+    PORTB |= _BV(PORTB7);
     UDADDR = address |= _BV(ADDEN);
+    PORTB &= ~_BV(PORTB7);
 }
 void usb_ep_set_interrupts(int epnum, int mask) {
     int iflags = usb_convert_iflags(mask);
@@ -204,6 +208,7 @@ ISR(USB_GEN_vect) {
 
 // USB communication / USB endpoint interrupt
 ISR(USB_COM_vect) {
+    PORTB |= _BV(PORTB4);
     uint8_t eps_to_service = UEINT;
     usb_token_t tok = 0;
 
@@ -214,15 +219,39 @@ ISR(USB_COM_vect) {
         if(eps_to_service & _BV(i)) {
             UENUM = i;
             uint8_t events = UEINTX;
+            if(UEINTX & _BV(TXINI)) {
+                PORTB |= _BV(PORTB5);
+            }
+            else {
+                PORTB &= ~_BV(PORTB5);
+            }
+            if(UEINTX & _BV(RXOUTI)) {
+                PORTB |= _BV(PORTB6);
+            }
+            else {
+                PORTB &= ~_BV(PORTB6);
+            }
             if(events & _BV(RXSTPI)) {
                 /*uart_puts("SETUP\r\n", 7);*/
                 // SETUP transfer setup transfer sends host->dev data, but
                 // RXOUTI is not triggered. endpoint will contain the request
                 // descriptor
+                usb_ep_handlers[i]->flags |= EP_XFER_STATE_SETUP;
+                usb_ep_handlers[i]->flags &= ~(EP_XFER_STATE_IN | EP_XFER_STATE_OUT);
                 handle_setup(i);
                 tok |= SETUP;
             }
             else if(events & _BV(TXINI)) {
+                usb_ep_handlers[i]->flags &= ~EP_XFER_STATE_SETUP;
+
+                if(usb_ep_handlers[i]->flags & EP_XFER_STATE_OUT) {
+                    usb_ep_handlers[i]->flags &= ~EP_XFER_STATE_OUT;
+                    // IN packet is signifying end of OUT xfer: ACK to allow
+                    // host to send next SETUP
+                    UEINTX &= ~_BV(TXINI);
+                    // TODO queue reset?
+                    continue;
+                }
                 /*uart_puts("IN\r\n", 4);*/
                 // IN transfer clear TXINI for control endpoints, else FIFOCON
                 // TODO flush also needs to repeatedly clear TXINI for
@@ -236,9 +265,19 @@ ISR(USB_COM_vect) {
                 tok |= IN;
             }
             else if(events & _BV(RXOUTI)) {
+                usb_ep_handlers[i]->flags &= ~EP_XFER_STATE_SETUP;
+
+                if(usb_ep_handlers[i]->flags & EP_XFER_STATE_IN) {
+                    usb_ep_handlers[i]->flags &= ~EP_XFER_STATE_IN;
+                    // IN packet is signifying end of OUT xfer: ACK to allow
+                    // host to send next SETUP
+                    UEINTX &= ~_BV(RXOUTI);
+                    // TODO queue reset?
+                    continue;
+                }
                 /*uart_puts("OUT\r\n", 5);*/
                 // OUT transfer
-                fill_queue(i);
+                fill_queue_ctrl(i);
                 tok |= OUT;
             }
             else {
@@ -248,8 +287,21 @@ ISR(USB_COM_vect) {
             if(usb_ep_handlers[i]->callback != NULL) {
                 usb_ep_handlers[i]->callback(usb_ep_handlers[i]->cb_ctx, tok);
             }
+            if(UEINTX & _BV(TXINI)) {
+                PORTB |= _BV(PORTB5);
+            }
+            else {
+                PORTB &= ~_BV(PORTB5);
+            }
+            if(UEINTX & _BV(RXOUTI)) {
+                PORTB |= _BV(PORTB6);
+            }
+            else {
+                PORTB &= ~_BV(PORTB6);
+            }
         }
     }
+    PORTB &= ~_BV(PORTB4);
 }
 
 static inline void set_flush_lock(uint8_t epnum) {
@@ -294,6 +346,30 @@ static inline void handle_setup(uint8_t epnum) {
         }
         // clear RXSTPI to allow IN / OUT requests to be ACK'd
         UEINTX &= ~_BV(RXSTPI);
+    }
+}
+
+/**
+ * Fill queue logic for CONTROL endpoints (no FIFOCON)
+ */
+static void fill_queue_ctrl(uint8_t epnum) {
+    queue_t *q = usb_ep_handlers[epnum]->data;
+    UENUM = epnum;
+    char c;
+    while(!QUEUE_FULL(q)) {
+        //  bank not empty
+        if(UEBCX > 0) {
+            // TODO without the temporary, UEDATX is not read and this loop blocks.
+            // wat.
+            c = UEDATX;
+            queue_push(q, c);
+        }
+        else {
+            // all banks empty and sw queue non-full, yield until next OUT
+            // or bank ready
+            UEINTX &= ~_BV(RXOUTI); // clear to prevent further interrupts
+            break;
+        }
     }
 }
 

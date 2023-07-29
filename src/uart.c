@@ -94,7 +94,7 @@ ISR(USART1_RX_vect) {
  */
 ISR(USART1_UDRE_vect) {
     char c = queue_pop(&uart_tx);
-    if(!uart_tx.op_ok) {
+    if(QUEUE_EMPTY(&uart_tx) || !uart_tx.op_ok) {
         UCSR1B &= ~(1 << UDRIE1); // disable txi
         uart_tx.op_ok = true;
     }

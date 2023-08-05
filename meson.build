@@ -86,7 +86,7 @@ if avrdude.found()
         command: [
             avrdude, '-p', host_machine.cpu(),
             '-c', get_option('programmer'),
-            '-U', 'flash:w:@INPUT@:i'
+            '-U', 'flash:w:@INPUT@:i', '-B', '1'
         ],
         input: main_hex,
         capture: true,

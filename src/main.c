@@ -1,6 +1,7 @@
 #include <avr/io.h>
 #include <avr/interrupt.h>
 #include <util/delay.h>
+#include <util/atomic.h>
 #include <stdint.h>
 #include "usb_base_descriptors.h"
 #include "usb_requests.h"
@@ -40,6 +41,7 @@ static bool run_handler = false;
 static usb_token_t recent_token;
 void schedule_handler(void *ctx, usb_token_t tok) {
     (void)ctx;
+    // called from isr, no need for atomic
     run_handler = true;
     recent_token = tok;
 }
@@ -54,6 +56,7 @@ int main(void) {
     // B6 = RXOUTI
     // B7 = schedule_handler
     DDRB |= 0xF0;
+    PORTB &= ~0xF0;
     DDRC |= (1 << 7);
     PORTC &= ~(1 << 7); // disable pullup
     configure_uart(115200, uart_bufs[0], uart_bufs[1], 512, 512);
@@ -70,9 +73,10 @@ int main(void) {
     sei();
     for(;;) {
         if(run_handler) {
-            uart_puts((char*)&recent_token, 1);
-            usb_std_req_handler(&ep0_std_ctx, recent_token);
-            run_handler = false;
+            ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
+                run_handler = false;
+                usb_std_req_handler(&ep0_std_ctx, recent_token);
+            }
         }
         asm("sleep");
     }

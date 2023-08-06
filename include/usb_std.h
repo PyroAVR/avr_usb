@@ -12,7 +12,6 @@ enum {
     USB_STD_STATE_AWAIT_IN,
     USB_STD_STATE_AWAIT_OUT,
     USB_STD_STATE_AWAIT_FLUSH,
-    USB_STD_STATE_AWAIT_IN_ADDR, // awaiting IN token after receiving SET_ADDR
 };
 
 // TODO should this definition go elsewhere, maybe in a platform-specific hdr?

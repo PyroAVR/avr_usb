@@ -23,12 +23,13 @@ typedef enum {
 } usb_token_t;
 
 enum {
-    USB_INT_IN = 1,
-    USB_INT_OUT = 2,
-    USB_INT_NAKIN = 4,
-    USB_INT_NAKOUT = 8,
-    USB_INT_STALLRQ = 16,
-    USB_INT_FLOW = 32, // under or over - type known via ep direction
+    USB_INT_SETUP = 1,
+    USB_INT_IN = 2,
+    USB_INT_OUT = 4,
+    USB_INT_NAKIN = 8,
+    USB_INT_NAKOUT = 16,
+    USB_INT_STALLRQ = 32,
+    USB_INT_FLOW = 64, // under or over - type known via ep direction
 };
 
 typedef void (usb_ep_cb)(void *ctx, usb_token_t token);
@@ -37,7 +38,7 @@ typedef void (usb_ep_cb)(void *ctx, usb_token_t token);
  * Write data into the IN FIFO for the given endpoint
  * return value: bytes written from buf
  */
-int usb_ep_write(int epnum, char *buf, size_t len);
+int usb_ep_write(int epnum, const char *buf, size_t len);
 
 /**
  * Read data up to the specified length from the OUT FIFO of the given endpoint.

@@ -13,29 +13,27 @@ static void handle_std_request(usb_std_req_ctx_t *ctx, usb_req_t *req);
 static void handle_get_desc(usb_std_req_ctx_t *ctx, usb_req_t *req);
 
 void usb_std_req_handler(usb_std_req_ctx_t *ctx, usb_token_t token) {
-    cli();
     usb_req_t *req;
-    /*uart_puts("std: ", 5);*/
+    uart_puts("std: ", 5);
     switch(ctx->state) {
         case USB_STD_STATE_AWAIT_FLUSH:
-            uart_puts("await flush\r\n", 13);
-            if(!usb_ep_flush_complete(0)) {
-                // with ideal driver configuration, this should never be hit -
-                // handlers are only called when their requested event is avail.
-                uart_puts(" still\r\n", 8);
-                sei();
-                return;
-            }
-            else {
+            /*else {*/
                 // return to setup state post-flush: a completed flush implies
                 // the next packet will be SETUP.
+                usb_ep_set_interrupts(0, USB_INT_SETUP);
                 uart_puts("to setup\r\n", 10);
                 ctx->state = USB_STD_STATE_SETUP;
-            }
+            /*}*/
         break;
 
         case USB_STD_STATE_SETUP:
-            /*uart_puts("setup\r\n", 7);*/
+            uart_puts("setup\r\n", 7);
+            while(!usb_ep_flush_complete(0)) {
+                uart_puts("await flush\r\n", 13);
+                // with ideal driver configuration, this should never be hit -
+                // handlers are only called when their requested event is avail.
+                usb_ep_set_interrupts(0, USB_INT_IN);
+            }
 #if defined(__AVR_ATmega32U4__)
             // directly access buffer: control transfers always reset the queue
             req = ctx->ep_queue->buffer;
@@ -45,30 +43,10 @@ void usb_std_req_handler(usb_std_req_ctx_t *ctx, usb_token_t token) {
             int size = usb_ep_read(0, ep0_buf, sizeof(ep0_buf));
             if(size < sizeof(ep0_buf)) {
                 // protocol invalid: setup packet is always eight bytes.
-                sei();
                 return;
             }
 #endif
             handle_std_request(ctx, req);
-        break;
-
-        case USB_STD_STATE_AWAIT_IN_ADDR:
-            uart_puts("await addr", 10);
-            if(token & IN) {
-                uart_puts(" set\r\n", 6);
-                /*usb_ep_flush(0);*/
-                usb_set_addr(ctx->addr);
-                QUEUE_RESET(ctx->ep_queue);
-            }
-            else {
-                uart_puts(" not set\r\n", 10);
-            }
-            // else, called for some other event - do not set address, but return
-            // to default state
-            ctx->state = USB_STD_STATE_SETUP;
-            PORTB &= ~_BV(PORTB7);
-            sei();
-            return;
         break;
 
         case USB_STD_STATE_AWAIT_IN:
@@ -77,7 +55,6 @@ void usb_std_req_handler(usb_std_req_ctx_t *ctx, usb_token_t token) {
             uart_puts("default\r\n", 9);
         break;
     }
-    sei();
 }
 
 static void handle_std_request(usb_std_req_ctx_t *ctx, usb_req_t *req) {
@@ -89,16 +66,17 @@ static void handle_std_request(usb_std_req_ctx_t *ctx, usb_req_t *req) {
         break;
 
         case USB_REQ_SET_ADDRESS:
-            uart_puts("addr\n", 5);
-            // wait for IN packet before setting address
             ctx->addr = req->std.wValue;
             // ack the NEXT in packet to tell host address is set, but don't
             // actually set it until after that packet, otherwise usb peripheral
             // will not receive the IN packet sent to address 0x00
-            UENUM = 0;
-            UEINTX &= ~_BV(TXINI);
-            usb_ep_set_interrupts(0, USB_INT_IN);
-            ctx->state = USB_STD_STATE_AWAIT_IN_ADDR;
+            usb_ep_flush(0);
+            // TODO should be able to run this w/ interrupts enabled if
+            // all the flags are set correctly, removing the need for this call.
+            sei();
+            while(!usb_ep_flush_complete(0));
+            usb_set_addr(ctx->addr);
+            ctx->state = USB_STD_STATE_SETUP;
         break;
 
         case USB_REQ_SET_CONFIGURATION:
@@ -130,11 +108,12 @@ static void handle_std_request(usb_std_req_ctx_t *ctx, usb_req_t *req) {
 static void handle_get_desc(usb_std_req_ctx_t *ctx, usb_req_t *req) {
     switch(req->get_desc.type) {
         case USB_DESC_DEVICE:
+            // TODO need to kill contents of OUT FIFO before second device desc req
             uart_puts("device\r\n", 8);
             usb_ep_write(0, &self_device_desc, sizeof(usb_device_desc_t));
-            usb_ep_set_interrupts(0, USB_INT_IN);
             usb_ep_flush(0);
-            ctx->state = USB_STD_STATE_AWAIT_FLUSH;
+            usb_ep_set_interrupts(0, USB_INT_IN);
+            ctx->state = USB_STD_STATE_SETUP;
         break;
 
         case USB_DESC_CONFIGURATION:
@@ -142,8 +121,9 @@ static void handle_get_desc(usb_std_req_ctx_t *ctx, usb_req_t *req) {
             // length will vary: first req. is for the config desc, then
             // for the entire configuration.
             usb_ep_write(0, &self_config_desc, req->std.wLength);
+            usb_ep_set_interrupts(0, USB_INT_IN);
             usb_ep_flush(0);
-            ctx->state = USB_STD_STATE_AWAIT_FLUSH;
+            ctx->state = USB_STD_STATE_SETUP;
 #if 0
             if(req->std.wLength == sizeof(usb_config_desc_t)) {
                 // send just the config desc first
